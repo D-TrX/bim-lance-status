@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Your request · BIM-Lance</title>
+<style>
+  :root { --ink:#1a1f2b; --muted:#6b7280; --line:#e5e7eb; --bg:#f4f5f7; --brand:#1f6feb; --ok:#127a3e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:#fff; border-bottom:3px solid var(--brand); padding:16px 24px; }
+  header a { color:var(--ink); text-decoration:none; font-weight:700; font-size:18px; }
+  main { max-width:760px; margin:28px auto; padding:0 16px; }
+  .card { background:#fff; border-radius:10px; padding:24px; margin-bottom:16px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .steps { display:flex; gap:8px; margin:20px 0 4px; }
+  .step { flex:1; text-align:center; font-size:13px; color:var(--muted); }
+  .bar { height:6px; border-radius:3px; background:var(--line); margin-bottom:6px; }
+  .step.done .bar { background:var(--brand); } .step.done { color:var(--ink); font-weight:600; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .price { font-weight:700; white-space:nowrap; }
+  .tag { display:inline-block; font-size:11px; padding:2px 6px; border-radius:4px; background:#e8f5ee; color:var(--ok); margin-left:6px; }
+  .notes { color:var(--muted); font-size:13px; margin-top:4px; }
+  .empty { color:var(--muted); padding:8px 0; }
+  @media (max-width:560px) { .hide-sm { display:none; } }
+</style>
+</head>
+<body>
+<header><a href="https://bim-lance.com">BIM-Lance</a></header>
+<main id="app"><div class="card"><p class="muted">Loading your request…</p></div></main>
+<script>
+  // No keys on this page. It calls the BIM-Lance backend, which returns only the
+  // non-sensitive status of the one request whose 32-character token is in the link.
+  const STATUS_API = 'https://scelhmgdetddxjptodye.supabase.co/functions/v1/bimlance/status';
+
+  const LABEL = { scan_to_bim:'Scan-to-BIM', logistics_4d:'Logistics / 4D', bim_coordination:'BIM coordination',
+    point_cloud:'Point cloud processing', laser_scanning:'Laser scanning', clash_detection:'Clash detection',
+    cad_drafting:'CAD drafting', rendering:'Architectural rendering', other:'Other' };
+  const PRIORITY = { budget:'Stay within budget', lowest_price:'Lowest price', quality:'Highest quality', speed:'Fastest turnaround', us_based:'US-based vendor' };
+  const STEPS = [['new','Received'], ['matched','Sent to vendors'], ['quoting','Quotes in'], ['awarded','Vendor hired']];
+  const app = document.getElementById('app');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const money = n => '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+  function render(r) {
+    const order = { new:0, no_match:1, matched:1, quoting:2, awarded:3, closed:3 };
+    const at = order[r.status] ?? 0;
+    const quotes = (r.quotes || []).slice().sort((a, b) => a.price - b.price);
+    const waiting = r.status === 'no_match'
+      ? 'We\'re lining up vetted vendors for this request and will email you when quotes arrive.'
+      : `Sent to ${r.vendors_contacted} vetted vendor${r.vendors_contacted === 1 ? '' : 's'}. You'll get an email for each quote.`;
+    app.innerHTML = `
+      <div class="card">
+        <h1>${esc(LABEL[r.service] || r.service)} request</h1>
+        <div class="muted">Submitted ${new Date(r.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })} · Priority: ${esc(PRIORITY[r.priority] || r.priority)}</div>
+        <div class="steps">${STEPS.map(([, l], i) => `<div class="step ${i <= at ? 'done' : ''}"><div class="bar"></div>${l}</div>`).join('')}</div>
+        <p class="muted" style="margin-top:14px">${waiting}</p>
+      </div>
+      <div class="card">
+        <h2 style="font-size:17px;margin:0 0 8px">Quotes (${quotes.length})</h2>
+        ${quotes.length ? `<table><thead><tr><th>Vendor</th><th>Price</th><th class="hide-sm">Turnaround</th></tr></thead><tbody>
+          ${quotes.map(q => `<tr><td>${esc(q.vendor)}${q.us_based ? '<span class="tag">US</span>' : ''}${q.notes ? `<div class="notes">${esc(q.notes)}</div>` : ''}</td>
+            <td class="price">${money(q.price)}</td><td class="hide-sm">${q.turnaround_days ? esc(q.turnaround_days) + ' calendar days' : '—'}</td></tr>`).join('')}
+        </tbody></table>` : '<p class="empty">No quotes yet. Vendors usually reply within 1–3 business days.</p>'}
+        <p class="muted" style="margin-top:16px">Questions? Reply to any BIM-Lance email or write to info@bim-lance.com.</p>
+      </div>`;
+  }
+
+  function fail(msg) { app.innerHTML = `<div class="card"><h1>Request not found</h1><p class="muted">${esc(msg)}</p></div>`; }
+
+  (async () => {
+    const token = new URLSearchParams(location.search).get('t') || '';
+    if (!/^[0-9a-f]{32}$/.test(token)) return fail('This link looks incomplete. Use the "Track your request" link from your BIM-Lance email.');
+    try {
+      const res = await fetch(`${STATUS_API}?t=${token}`);
+      if (res.status === 404) return fail('We couldn\'t find this request. Check the link in your email, or contact info@bim-lance.com.');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data) return fail('We couldn\'t find this request. Check the link in your email, or contact info@bim-lance.com.');
+      render(data);
+    } catch (e) {
+      fail('We couldn\'t load your request right now. Please try again in a minute.');
+    }
+  })();
+</script>
+</body>
+</html>
